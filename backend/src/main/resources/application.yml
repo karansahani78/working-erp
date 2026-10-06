@@ -1,0 +1,334 @@
+server:
+  port: 8080
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+  forward-headers-strategy: framework
+  compression:
+    enabled: true
+    mime-types: application/json,text/html,text/css,application/javascript
+  tomcat:
+    max-swallow-size: 25MB
+
+spring:
+  application:
+    name: education-erp
+
+  profiles:
+    active: dev
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/erp
+    username: postgres
+    password: karan14
+    driver-class-name: org.postgresql.Driver
+
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: erp-pool
+
+  jpa:
+    open-in-view: false
+
+    hibernate:
+      ddl-auto: validate
+
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 60
+
+        query:
+          in_clause_parameter_padding: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    out-of-order: false
+
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: UTC
+
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+
+    deserialization:
+      fail-on-unknown-properties: false
+
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+
+  mail:
+    host: localhost
+    port: 1025
+    username: local
+    password: local
+
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
+
+  threads:
+    virtual:
+      enabled: true
+
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: erp-sched-
+
+  mvc:
+    problemdetails:
+      enabled: false
+
+
+erp:
+
+  security:
+
+    jwt:
+      # LOCAL DEVELOPMENT ONLY.
+      # NEVER use this secret in production.
+      secret: 956c3b6d347c3e686c49b95a38ab7e7f8a4fe056205c6f96255a8ddd1cb62fc4
+
+      issuer: education-erp
+
+      access-token-ttl: PT30M
+      refresh-token-ttl: P7D
+
+    max-failed-attempts: 5
+
+    lock-duration: PT15M
+
+    password:
+      min-length: 10
+
+    cors:
+      allowed-origins: http://localhost:5173,http://localhost:3000
+
+    rate-limit:
+      enabled: true
+
+      login-per-minute: 10
+
+      password-reset-per-minute: 5
+
+      api-per-minute: 600
+
+      upload-per-minute: 30
+
+
+  storage:
+
+    # Document bytes live outside the database: local disk now,
+    # object storage later without a migration.
+    #
+    # LOCAL means uploaded documents are stored on the local filesystem.
+    provider: LOCAL
+
+    # Relative path from the application working directory.
+    local-root: ./data/documents
+
+    # 25 MB
+    max-document-bytes: 26214400
+
+    allowed-content-types: application/pdf,image/png,image/jpeg,image/webp,image/gif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/plain,text/csv
+
+    s3:
+
+      # S3 is not used while provider=LOCAL.
+      # These values are provided so nothing is left undefined.
+      endpoint: http://localhost:9000
+      region: us-east-1
+      access-key: minioadmin
+      secret-key: minioadmin123
+      bucket: education-erp
+
+
+  payments:
+
+    # All payment gateways are disabled for local development.
+    esewa-enabled: false
+    khalti-enabled: false
+    fonepay-enabled: false
+
+    currency: NPR
+
+    # ---------------------------------------------------------
+    # eSewa
+    # ---------------------------------------------------------
+
+    esewa:
+
+      enabled: false
+
+      base-url: https://rc-epay.esewa.com.np
+
+      merchant-id: local-test-merchant
+
+      secret-key: local-test-esewa-secret
+
+      initiate-path: /merchant-service/v1/merchant-transaction/initiate
+
+      verify-path: /merchant-service/v1/merchant-transaction/status
+
+
+    # ---------------------------------------------------------
+    # Khalti
+    # ---------------------------------------------------------
+
+    khalti:
+
+      enabled: false
+
+      base-url: https://a.khalti.com
+
+      merchant-id: local-test-merchant
+
+      secret-key: local-test-khalti-secret
+
+      initiate-path: /api/v2/payment/initiate
+
+      verify-path: /api/v2/payment/verify
+
+
+    # ---------------------------------------------------------
+    # Fonepay
+    # ---------------------------------------------------------
+
+    fonepay:
+
+      enabled: false
+
+      base-url: https://dev-clientapi.fonepay.com
+
+      merchant-id: local-test-merchant
+
+      secret-key: local-test-fonepay-secret
+
+      initiate-path: /api/payment/initiate
+
+      verify-path: /api/payment/status
+
+
+  notifications:
+
+    # In-app notifications work locally.
+    in-app-enabled: true
+
+    # Email/SMS/Push/WhatsApp are disabled locally.
+    email-enabled: false
+
+    sms-enabled: false
+
+    push-enabled: false
+
+    whatsapp-enabled: false
+
+    sms-provider-url: http://localhost:8081/api/sms
+
+
+  jobs:
+
+    enabled: true
+
+    # Every day at 06:00:00
+    fee-reminder-cron: 0 0 6 * * *
+
+    # Every day at 18:00:00
+    attendance-alert-cron: 0 0 18 * * *
+
+    # Every day at 03:30:00
+    cleanup-cron: 0 30 3 * * *
+
+
+  imports:
+
+    max-rows: 5000
+
+
+  ui:
+
+    default-page-size: 20
+
+    max-page-size: 100
+
+
+management:
+
+  endpoints:
+
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+  endpoint:
+
+    health:
+      show-details: when_authorized
+
+      probes:
+        enabled: true
+
+  metrics:
+
+    tags:
+      application: education-erp
+
+  health:
+
+    mail:
+      enabled: false
+
+
+springdoc:
+
+  swagger-ui:
+
+    path: /swagger-ui.html
+
+    operations-sorter: alpha
+
+    tags-sorter: alpha
+
+  api-docs:
+
+    path: /v3/api-docs
+
+
+logging:
+
+  pattern:
+
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%X{requestId:-}] %-40.40logger{39} : %m%n"
+
+  level:
+
+    root: INFO
+
+    com.educationerp: INFO
+
+    org.hibernate.SQL: WARN
+
+    org.flywaydb: INFO

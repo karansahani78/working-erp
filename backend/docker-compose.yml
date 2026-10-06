@@ -1,0 +1,21 @@
+services:
+  minio:
+    image: quay.io/minio/aistor/minio:RELEASE.2026-09-19T17-05-25Z
+    container_name: education-erp-minio
+    restart: unless-stopped
+
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+
+    volumes:
+      - minio_data:/data
+
+    command: server /data --console-address ":9001"
+
+volumes:
+  minio_data:

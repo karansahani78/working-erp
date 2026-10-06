@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+
+/*
+ * One palette, taken from the design direction: a deep institutional green on a warm
+ * paper background. Everything else is a tint of the same warm neutral, so screens read as
+ * one system instead of a collection of components.
+ */
+@theme {
+  --color-primary: #0f5132;
+  --color-primary-hover: #0c4229;
+  --color-primary-soft: #e3ede7;
+  --color-primary-ring: #0f513233;
+
+  --color-canvas: #f4f0e8;
+  --color-surface: #ffffff;
+  --color-surface-soft: #eae5db;
+  --color-border: #d6cec0;
+  --color-border-strong: #bdb2a0;
+
+  --color-ink: #1f1d19;
+  --color-ink-muted: #6f675b;
+  --color-ink-subtle: #887f72;
+
+  --color-danger: #9b2c2c;
+  --color-danger-soft: #f7e9e9;
+  --color-warning: #8a5a12;
+  --color-warning-soft: #f8f0dd;
+  --color-info: #2c5a7a;
+  --color-info-soft: #e7eff4;
+
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  --radius-card: 0.75rem;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* Keyboard focus must be obvious on every interactive element, not just the default. */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-primary);
+    color: #fff;
+  }
+}
+
+@layer utilities {
+  /* Tabular figures keep numeric columns aligned, which matters in a table of money. */
+  .nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
