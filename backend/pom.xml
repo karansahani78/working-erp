@@ -203,6 +203,13 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>-XX:+EnableDynamicAgentLoading -Duser.language=en -Duser.country=US -Dfile.encoding=UTF-8</argLine>
+                    <!-- The integration suite signs in repeatedly and would otherwise trip
+                         the login rate limiter (the repo root has an application.yml the
+                         JVM working directory loads with higher precedence than the test
+                         profile). Disabling the limiter is a test-only concern. -->
+                    <systemPropertyVariables>
+                        <erp.security.rate-limit.enabled>false</erp.security.rate-limit.enabled>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

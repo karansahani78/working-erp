@@ -12,8 +12,13 @@ import com.educationerp.student.Student;
 import com.educationerp.student.StudentRepository;
 import com.educationerp.audit.AuditEvent;
 import com.educationerp.audit.AuditService;
+import com.educationerp.academic.CourseOffering;
+import com.educationerp.academic.CourseOfferingRepository;
 import com.educationerp.auth.security.AuthorizationChecker;
 import com.educationerp.auth.user.AuthenticatedUser;
+import com.educationerp.student.Enrollment;
+import com.educationerp.student.EnrollmentRepository;
+import com.educationerp.student.UserLookup;
 import com.educationerp.common.error.AppException;
 import com.educationerp.common.error.Enums;
 import com.educationerp.common.error.ErrorCode;
@@ -27,9 +32,11 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -50,21 +57,42 @@ public class AttendanceService {
     private final org.springframework.context.ApplicationEventPublisher events;
     private final AttendanceRecordRepository records;
     private final AttendanceCorrectionRepository corrections;
+    private final CourseOfferingRepository offerings;
+    private final EnrollmentRepository enrollments;
+    private final UserLookup users;
     private final AuthorizationChecker auth;
     private final AuditService audit;
 
     /**
-     * Records a whole register at once. Re-sending an entry for the same
-     * student/date/period updates the existing draft rather than creating a duplicate,
-     * which keeps the client simple to retry.
+     * Attendance may be managed by the assigned teacher, or by anyone the school has made
+     * a supervisor of attendance (leadership and administrators). Everyone else is refused
+     * even when they hold the marking permission, so one teacher can never touch another
+     * teacher's register.
      */
     @Transactional
     public AttendanceDtos.RegisterResponse recordRegister(AttendanceDtos.RegisterRequest request) {
         auth.requirePermission("ATTENDANCE_MARK");
         UUID actor = currentUserId();
 
+        CourseOffering offering = requireAccessibleOffering(request.courseOfferingId(),
+                "ATTENDANCE_MARK");
+        List<Enrollment> roster = rosterOf(offering);
+        Set<UUID> rosters = rosterStudentIds(roster);
+        Map<UUID, UUID> enrolmentByStudent = new HashMap<>();
+        for (Enrollment enrolment : roster) {
+            enrolmentByStudent.put(enrolment.getStudentId(), enrolment.getId());
+        }
+
         AttendanceRecord.PeriodType periodType = resolvePeriodType(request);
         List<AttendanceDtos.Entry> entries = request.entries();
+        if (!rosters.isEmpty()) {
+            for (AttendanceDtos.Entry entry : entries) {
+                if (!rosters.contains(entry.studentId())) {
+                    throw AppException.denied("A student in this register is not in the class "
+                            + "taught by you.");
+                }
+            }
+        }
         for (AttendanceDtos.Entry entry : entries) {
             AttendanceRecord.Status status = parseStatus(entry.status());
             UUID timeSlot = periodType == AttendanceRecord.PeriodType.PERIOD
@@ -79,6 +107,8 @@ public class AttendanceService {
                 throw AppException.rule("Attendance for this period has already been approved. "
                         + "Request a correction instead.");
             }
+            record.setEnrollmentId(enrolmentByStudent.get(entry.studentId()));
+            record.setRecordedBy(actor);
             record.setStatus(status);
             record.setMinutesLate(validateLateMinutes(status, entry.minutesLate()));
             record.setRemarks(entry.remarks() != null ? entry.remarks() : request.remarks());
@@ -108,6 +138,7 @@ public class AttendanceService {
                                                  LocalDate attendanceDate,
                                                  UUID timeSlotId) {
         auth.requirePermission("ATTENDANCE_MARK");
+        requireAccessibleOffering(courseOfferingId, "ATTENDANCE_MARK");
         List<AttendanceRecord> register = loadRegister(courseOfferingId, attendanceDate, timeSlotId);
         if (register.isEmpty()) {
             throw AppException.rule("There is no attendance to submit for this period.");
@@ -144,6 +175,7 @@ public class AttendanceService {
                                                    LocalDate attendanceDate,
                                                    UUID timeSlotId) {
         auth.requirePermission("ATTENDANCE_APPROVE");
+        requireAccessibleOffering(courseOfferingId, "ATTENDANCE_APPROVE");
         List<AttendanceRecord> register = loadRegister(courseOfferingId, attendanceDate, timeSlotId);
         if (register.isEmpty()) {
             throw AppException.rule("There is no attendance to approve for this period.");
@@ -205,7 +237,7 @@ public class AttendanceService {
 
     @Transactional(readOnly = true)
     public AttendanceDtos.RegisterResponse register(UUID courseOfferingId, LocalDate attendanceDate, UUID timeSlotId) {
-        auth.requirePermission("ATTENDANCE_READ");
+        requireAccessibleOffering(courseOfferingId, "ATTENDANCE_READ");
         return registerView(courseOfferingId, attendanceDate, timeSlotId);
     }
 
@@ -219,7 +251,7 @@ public class AttendanceService {
 
     @Transactional(readOnly = true)
     public List<AttendanceDtos.Response> forOffering(UUID courseOfferingId, LocalDate from, LocalDate to) {
-        auth.requirePermission("ATTENDANCE_READ");
+        requireAccessibleOffering(courseOfferingId, "ATTENDANCE_READ");
         return records.findByCourseOfferingIdAndAttendanceDateBetweenOrderByAttendanceDateAsc(
                         courseOfferingId, from, to).stream()
                 .map(AttendanceDtos.Response::from)
@@ -271,6 +303,7 @@ public class AttendanceService {
                                                                 AttendanceDtos.CorrectionRequest request) {
         auth.requirePermission("ATTENDANCE_CORRECT");
         AttendanceRecord record = requireRecord(attendanceId);
+        requireAccessibleOffering(record.getCourseOfferingId(), "ATTENDANCE_CORRECT");
         if (record.getWorkflowStatus() == AttendanceRecord.WorkflowStatus.DRAFT) {
             throw AppException.rule("This attendance record has not been approved yet. "
                     + "Update it directly while it is still a draft.");
@@ -313,12 +346,13 @@ public class AttendanceService {
         auth.requirePermission("ATTENDANCE_APPROVE");
         AttendanceCorrection correction = corrections.findById(correctionId)
                 .orElseThrow(() -> AppException.notFound("Attendance correction"));
+        AttendanceRecord record = requireRecord(correction.getAttendanceId());
+        requireAccessibleOffering(record.getCourseOfferingId(), "ATTENDANCE_APPROVE");
         if (correction.getStatus() != AttendanceCorrection.Status.PENDING) {
             throw new AppException(ErrorCode.INVALID_STATE_TRANSITION,
                     "This correction has already been " + correction.getStatus() + ".");
         }
 
-        AttendanceRecord record = requireRecord(correction.getAttendanceId());
         if (correction.getStatus() == AttendanceCorrection.Status.PENDING
                 && record.getStatus() != correction.getOldStatus()) {
             throw new AppException(ErrorCode.CONFLICTING_OPERATION,
@@ -361,13 +395,66 @@ public class AttendanceService {
 
     @Transactional(readOnly = true)
     public List<AttendanceDtos.CorrectionResponse> correctionsFor(UUID attendanceId) {
-        auth.requirePermission("ATTENDANCE_READ");
+        AttendanceRecord record = requireRecord(attendanceId);
+        requireAccessibleOffering(record.getCourseOfferingId(), "ATTENDANCE_READ");
         return corrections.findByAttendanceIdOrderByRequestedAtDesc(attendanceId).stream()
                 .map(AttendanceDtos.CorrectionResponse::from)
                 .toList();
     }
 
     // ---------- helpers ----------
+
+    /** A supervisor of attendance (leadership, administration) works across the school. */
+    private boolean attendanceSupervisor() {
+        return auth.hasPermission("ATTENDANCE_APPROVE");
+    }
+
+    /**
+     * Loads a course offering only after checking the caller may act on it. A teacher's
+     * reach is their own assignments; anyone without the supervisory attendance permission
+     * who is not the assigned teacher is refused, whatever marking permissions they hold.
+     */
+    private CourseOffering requireAccessibleOffering(UUID courseOfferingId, String permission) {
+        auth.requirePermission(permission);
+        CourseOffering offering = offerings.findById(courseOfferingId)
+                .orElseThrow(() -> AppException.notFound("Course offering"));
+        if (attendanceSupervisor()) {
+            return offering;
+        }
+        UUID employeeId = users.employeeIdOf(auth.requireUser().userId())
+                .orElseThrow(() -> AppException.denied("You do not have permission to perform this action."));
+        if (offering.getTeacherId() == null || !offering.getTeacherId().equals(employeeId)) {
+            throw AppException.denied("You are not assigned to that class.");
+        }
+        return offering;
+    }
+
+    /**
+     * The students a register may name: everyone currently enrolled in the offering's
+     * class, narrowed to its section when the offering names one. An offering with no
+     * section yet is scoped by the class alone.
+     */
+    private List<Enrollment> rosterOf(CourseOffering offering) {
+        if (offering.getAcademicYear() == null || offering.getSchoolClass() == null) {
+            return List.of();
+        }
+        return enrollments
+                .findByAcademicYearIdAndSchoolClassIdAndStatusOrderByRollNumberAsc(
+                        offering.getAcademicYear().getId(), offering.getSchoolClass().getId(),
+                        Enrollment.Status.ACTIVE)
+                .stream()
+                .filter(enrollment -> offering.getSection() == null
+                        || offering.getSection().getId().equals(enrollment.getSectionId()))
+                .toList();
+    }
+
+    private Set<UUID> rosterStudentIds(List<Enrollment> roster) {
+        Set<UUID> ids = new java.util.HashSet<>();
+        for (Enrollment enrolment : roster) {
+            ids.add(enrolment.getStudentId());
+        }
+        return ids;
+    }
 
     private AttendanceRecord newRecord(UUID studentId,
                                       AttendanceDtos.RegisterRequest request,

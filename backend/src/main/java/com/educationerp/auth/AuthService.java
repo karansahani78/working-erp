@@ -156,7 +156,12 @@ public class AuthService {
             throw new AppException(ErrorCode.INVALID_TOKEN);
         }
         User user = userRepository.findById(stored.getUserId()).orElseThrow(() -> new AppException(ErrorCode.INVALID_TOKEN));
+        if (user.getStatus() == UserStatus.LOCKED || user.isLocked(now)) {
+            auditFailure(user, user.getUsername(), "Account locked during refresh", ip);
+            throw new AppException(ErrorCode.ACCOUNT_LOCKED);
+        }
         if (user.getStatus() != UserStatus.ACTIVE) {
+            auditFailure(user, user.getUsername(), "Account status " + user.getStatus() + " during refresh", ip);
             throw new AppException(ErrorCode.ACCOUNT_INACTIVE);
         }
 
@@ -272,9 +277,10 @@ public class AuthService {
             log.info("Password reset requested for unknown or inactive account identifierHash={}", identifier.hashCode());
             return;
         }
-        String recipient = request.email() != null && !request.email().isBlank()
-                ? request.email()
-                : user.getEmail();
+        // The reset link always goes to the email the account was created with. Accepting
+        // an arbitrary address from the caller would let someone reset an account they do
+        // not own by redirecting the token to their own inbox.
+        String recipient = user.getEmail();
         if (recipient == null || recipient.isBlank()) {
             log.info("Password reset requested for {} but no email is on file", user.getUsername());
             return;

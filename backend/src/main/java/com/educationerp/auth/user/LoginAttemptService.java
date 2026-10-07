@@ -1,5 +1,6 @@
 package com.educationerp.auth.user;
 
+import com.educationerp.auth.security.AuthenticatedUserLoader;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -23,6 +24,7 @@ import java.util.UUID;
 public class LoginAttemptService {
 
     private final UserRepository userRepository;
+    private final AuthenticatedUserLoader userLoader;
 
     /**
      * Increments the failure counter and locks the account once the threshold is reached.
@@ -38,6 +40,9 @@ public class LoginAttemptService {
         Instant now = Instant.now();
         user.registerFailedLogin(now, maxAttempts, lockDuration, ip);
         userRepository.save(user);
+        // A failed attempt may have started a lockout, so the cached principal must not
+        // keep treating the account as free while its access tokens still circulate.
+        userLoader.invalidate(userId);
         return user.isLocked(now);
     }
 

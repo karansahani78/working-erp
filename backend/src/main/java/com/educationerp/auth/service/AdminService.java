@@ -7,6 +7,7 @@ import com.educationerp.auth.permission.Permission;
 import com.educationerp.auth.role.Role;
 import com.educationerp.auth.role.RoleDefaults;
 import com.educationerp.auth.security.AuthorizationChecker;
+import com.educationerp.auth.security.AuthenticatedUserLoader;
 import com.educationerp.auth.user.AuthenticatedUser;
 import com.educationerp.auth.user.RoleDefinition;
 import com.educationerp.auth.user.RoleDefinitionRepository;
@@ -54,6 +55,7 @@ public class AdminService {
     private final AuthorizationChecker authorization;
     private final PasswordEncoder passwordEncoder;
     private final AuditService audit;
+    private final AuthenticatedUserLoader principalLoader;
 
     // ------------------------------------------------------------------ users
 
@@ -91,6 +93,7 @@ public class AdminService {
 
         Role role = parseRole(request.role());
         checkPasswordPolicy(request.password());
+        rejectImpossibleIdentity(role, request.studentId(), request.employeeId());
 
         User user = new User();
         user.setUsername(request.username().trim());
@@ -114,6 +117,7 @@ public class AdminService {
         }
 
         users.save(user);
+        principalLoader.invalidate(user.getId());
 
         audit.record(AuditEvent.builder()
                 .action(AuditAction.CREATE)
@@ -132,8 +136,10 @@ public class AdminService {
     public AdminDtos.UserResponse updateUser(UUID id, AdminDtos.UpdateUserRequest request) {
         authorization.requirePermission("USER_UPDATE");
         User user = users.findById(id).orElseThrow(() -> AppException.notFound("User"));
+        requireCanManageSuperAdmin(user);
         Role nextRole = parseRole(request.role());
         UserStatus nextStatus = parseStatus(request.status());
+        rejectImpossibleIdentity(nextRole, user.getStudentId(), user.getEmployeeId());
 
         String beforeRole = user.getPrimaryRole().name();
         String beforeStatus = user.getStatus().name();
@@ -169,6 +175,7 @@ public class AdminService {
         }
 
         users.save(user);
+        principalLoader.invalidate(user.getId());
 
         audit.record(AuditEvent.builder()
                 .action(AuditAction.UPDATE)
@@ -188,11 +195,13 @@ public class AdminService {
     public void resetPassword(UUID id, String password) {
         authorization.requirePermission("USER_UPDATE");
         User user = users.findById(id).orElseThrow(() -> AppException.notFound("User"));
+        requireCanManageSuperAdmin(user);
         checkPasswordPolicy(password);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setPasswordChangedAt(Instant.now());
         user.clearLockout();
         users.save(user);
+        principalLoader.invalidate(user.getId());
 
         audit.record(AuditEvent.builder()
                 .action(AuditAction.PASSWORD_CHANGE)
@@ -268,6 +277,7 @@ public class AdminService {
         role.getPermissions().clear();
         role.getPermissions().addAll(requested);
         roles.save(role);
+        principalLoader.invalidateAll();
 
         audit.record(AuditEvent.builder()
                 .action(AuditAction.UPDATE)
@@ -346,6 +356,38 @@ public class AdminService {
                 .anyMatch(other -> !other.getId().equals(user.getId()));
         if (!otherAdmins) {
             throw AppException.rule("This is the only active administrator; " + action + " would leave nobody able to administer the institution.");
+        }
+    }
+
+    /**
+     * A Super Admin account is the highest trust level the institution owns. People with
+     * user-administration rights below that level must not be able to demote, lock or
+     * otherwise alter one, even when they may manage every other sign-in.
+     */
+    private void requireCanManageSuperAdmin(User target) {
+        if (target.getPrimaryRole() != Role.SUPER_ADMIN) {
+            return;
+        }
+        User caller = users.findById(authorization.requireUser().userId()).orElse(null);
+        if (caller == null || caller.getPrimaryRole() != Role.SUPER_ADMIN) {
+            throw AppException.rule("Only a Super Admin can manage another Super Admin account.");
+        }
+    }
+
+    /**
+     * The identity links a sign-in carries must agree with the role it is given. A student
+     * sign-in cannot double as an employee sign-in for the exam system, and an employee
+     * role cannot quietly keep a student profile it inherited from a previous role.
+     */
+    private void rejectImpossibleIdentity(Role role, UUID studentId, UUID employeeId) {
+        if (role == Role.STUDENT && employeeId != null) {
+            throw AppException.rule("A student sign-in cannot be linked to an employee profile.");
+        }
+        if (role == Role.PARENT && (studentId != null || employeeId != null)) {
+            throw AppException.rule("A parent sign-in cannot be linked to a student or employee profile.");
+        }
+        if (role != Role.STUDENT && studentId != null) {
+            throw AppException.rule("A student profile link is only valid for a student sign-in.");
         }
     }
 

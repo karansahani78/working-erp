@@ -74,6 +74,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void anUnknownEnumInTheRegisterIsAValidationRatherThanAServerError() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("a.enum@example.edu");
+        offerings.enroll(student, offering);
 
         // periodType went straight to Enum.valueOf on whatever the client sent, so "hourly"
         // reached the catch-all handler as an unhandled exception: a 500 for a typo.
@@ -120,7 +121,9 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void bulkRegisterRecordsEveryStudentInThePeriod() throws Exception {
         UUID offering = offerings.createOffering();
         UUID a = offerings.createStudent("a.att@example.edu");
+        offerings.enroll(a, offering);
         UUID b = offerings.createStudent("b.att@example.edu");
+        offerings.enroll(b, offering);
 
         recordRegister(offering, a, "PRESENT");
         String body = recordRegister(offering, b, "ABSENT");
@@ -135,6 +138,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void reSubmittingTheSamePeriodUpdatesInsteadOfDuplicating() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("retry.att@example.edu");
+        offerings.enroll(student, offering);
 
         recordRegister(offering, student, "PRESENT");
         recordRegister(offering, student, "ABSENT");
@@ -149,6 +153,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void lateRequiresMinutesLate() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("late.att@example.edu");
+        offerings.enroll(student, offering);
 
         mockMvc.perform(post("/api/v1/attendance/registers")
                         .header("Authorization", bearer(token))
@@ -165,6 +170,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void periodAttendanceWithoutTimeSlotIsRejected() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("period.att@example.edu");
+        offerings.enroll(student, offering);
 
         mockMvc.perform(post("/api/v1/attendance/registers")
                         .header("Authorization", bearer(token))
@@ -181,6 +187,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void registerIsApprovedOnlyAfterApproval() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("approve.att@example.edu");
+        offerings.enroll(student, offering);
         recordRegister(offering, student, "PRESENT");
 
         assertThat(record(offering, student).getWorkflowStatus())
@@ -200,6 +207,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void approvedRegisterCannotBeOverwrittenDirectly() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("locked.att@example.edu");
+        offerings.enroll(student, offering);
         recordRegister(offering, student, "PRESENT");
         approveRegister(offering);
 
@@ -220,6 +228,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void approvedRegisterCorrectionRequiresApprovalBeforeItApplies() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("correct.att@example.edu");
+        offerings.enroll(student, offering);
         recordRegister(offering, student, "ABSENT");
         approveRegister(offering);
         UUID recordId = record(offering, student).getId();
@@ -258,6 +267,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void rejectedCorrectionLeavesTheRecordUnchanged() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("reject.att@example.edu");
+        offerings.enroll(student, offering);
         recordRegister(offering, student, "ABSENT");
         approveRegister(offering);
         UUID recordId = record(offering, student).getId();
@@ -283,6 +293,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void correctionRequiresAReason() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("noreason.att@example.edu");
+        offerings.enroll(student, offering);
         recordRegister(offering, student, "ABSENT");
         approveRegister(offering);
         UUID recordId = record(offering, student).getId();
@@ -298,6 +309,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void attendancePercentageCountsExcusedAsPresent() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("summary.att@example.edu");
+        offerings.enroll(student, offering);
 
         // One record per day: daily attendance is keyed on the date, not on repeated calls.
         recordRegister(offering, student, "PRESENT", null, date);
@@ -320,6 +332,7 @@ class AttendanceIntegrationTest extends IntegrationTest {
     void correctingADraftIsRejectedInFavourOfADirectEdit() throws Exception {
         UUID offering = offerings.createOffering();
         UUID student = offerings.createStudent("draft.att@example.edu");
+        offerings.enroll(student, offering);
         recordRegister(offering, student, "ABSENT");
         UUID recordId = record(offering, student).getId();
 

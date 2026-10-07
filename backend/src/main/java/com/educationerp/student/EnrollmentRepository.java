@@ -22,6 +22,16 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, UUID> {
     List<Enrollment> findByStudentIdOrderByCreatedAtDesc(UUID studentId);
 
     /**
+     * The enrolment of one student in one section. This is the single source of truth
+     * for "is this student really in this class" used by attendance and marks scope.
+     */
+    Optional<Enrollment> findFirstByStudentIdAndAcademicYearIdAndSchoolClassIdAndSectionIdAndStatus(
+            UUID studentId, UUID academicYearId, UUID schoolClassId, UUID sectionId, Enrollment.Status status);
+
+    boolean existsByStudentIdAndAcademicYearIdAndSchoolClassIdAndSectionIdAndStatus(
+            UUID studentId, UUID academicYearId, UUID schoolClassId, UUID sectionId, Enrollment.Status status);
+
+    /**
      * The active students of one section, in roll order. This is how a teacher portal finds
      * the people in an assigned class: an offering names a class and a section, and the
      * enrollments do the rest.

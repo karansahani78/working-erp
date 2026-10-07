@@ -170,6 +170,7 @@ public class ReportCardService {
         auth.requirePermission("REPORT_CARD_GENERATE");
         ReportCard card = reportCards.findById(cardId)
                 .orElseThrow(() -> AppException.notFound("Report card"));
+        requireStudentScope(card.getStudentId());
         ReportCard.Status current = card.getStatus();
         ReportCard.Status target;
         try {
@@ -202,8 +203,10 @@ public class ReportCardService {
     @Transactional(readOnly = true)
     public ExamDtos.ReportCardResponse get(UUID cardId) {
         auth.requirePermission("REPORT_CARD_READ");
-        return toResponse(reportCards.findById(cardId)
-                .orElseThrow(() -> AppException.notFound("Report card")));
+        ReportCard card = reportCards.findById(cardId)
+                .orElseThrow(() -> AppException.notFound("Report card"));
+        requireStudentScope(card.getStudentId());
+        return toResponse(card);
     }
 
     @Transactional(readOnly = true)
@@ -265,6 +268,7 @@ public class ReportCardService {
         auth.requirePermission("TRANSCRIPT_READ");
         Transcript transcript = transcripts.findById(transcriptId)
                 .orElseThrow(() -> AppException.notFound("Transcript"));
+        requireStudentScope(transcript.getStudentId());
         return toResponse(transcript, reportCards.findByStudentIdOrderByCreatedAtDesc(transcript.getStudentId()));
     }
 
@@ -273,6 +277,7 @@ public class ReportCardService {
         auth.requirePermission("TRANSCRIPT_GENERATE");
         Transcript transcript = transcripts.findById(transcriptId)
                 .orElseThrow(() -> AppException.notFound("Transcript"));
+        requireStudentScope(transcript.getStudentId());
         if (transcript.getStatus() != Transcript.Status.DRAFT) {
             throw new AppException(ErrorCode.INVALID_STATE_TRANSITION,
                     "Only a draft transcript can be finalised.");
@@ -365,6 +370,15 @@ public class ReportCardService {
 
     private BigDecimal nz(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    /**
+     * A report card or transcript belongs to one student. Staff who read them generally
+     * also hold STUDENT_READ, but a school may issue a custom role that reads cards
+     * without the blanket student-data read, so the owner is always enforced.
+     */
+    private void requireStudentScope(UUID studentId) {
+        auth.requireStudentAccess(studentId);
     }
 
     private UUID currentUserId() {

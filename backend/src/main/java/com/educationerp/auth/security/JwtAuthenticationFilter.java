@@ -70,6 +70,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 chain.doFilter(request, response);
                 return;
             }
+            if (principal.status() != com.educationerp.auth.user.UserStatus.ACTIVE
+                    || (principal.lockedUntil() != null && principal.lockedUntil().isAfter(java.time.Instant.now()))) {
+                log.warn("Rejected access token for non-active or locked account subject={} requestId={}",
+                        principal.username(), RequestContext.getRequestId());
+                SecurityContextHolder.clearContext();
+                chain.doFilter(request, response);
+                return;
+            }
             Collection<SimpleGrantedAuthority> authorities = new ArrayList<>();
             for (String permission : principal.permissions()) {
                 authorities.add(new SimpleGrantedAuthority(permission));

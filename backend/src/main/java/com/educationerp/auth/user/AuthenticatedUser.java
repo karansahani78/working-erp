@@ -1,5 +1,6 @@
 package com.educationerp.auth.user;
 
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -14,7 +15,9 @@ public record AuthenticatedUser(
         java.util.Set<String> permissions,
         UUID studentId,
         java.util.Set<UUID> studentIds,
-        String tokenVersion
+        String tokenVersion,
+        UserStatus status,
+        Instant lockedUntil
 ) {
 
     public boolean hasRole(String role) {

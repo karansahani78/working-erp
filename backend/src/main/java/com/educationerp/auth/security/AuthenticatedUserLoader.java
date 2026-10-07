@@ -110,7 +110,9 @@ public class AuthenticatedUserLoader {
                 Set.copyOf(permissions),
                 primaryStudentId,
                 Set.copyOf(studentIds),
-                tokenVersionOf(user));
+                tokenVersionOf(user),
+                user.getStatus(),
+                user.getLockedUntil());
     }
 
     /**

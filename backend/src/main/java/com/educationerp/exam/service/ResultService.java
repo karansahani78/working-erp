@@ -2,6 +2,8 @@ package com.educationerp.exam.service;
 
 import com.educationerp.audit.AuditEvent;
 import com.educationerp.audit.AuditService;
+import com.educationerp.academic.CourseOffering;
+import com.educationerp.academic.CourseOfferingRepository;
 import com.educationerp.auth.security.AuthorizationChecker;
 import com.educationerp.common.error.AppException;
 import com.educationerp.common.error.ErrorCode;
@@ -15,7 +17,10 @@ import com.educationerp.exam.ResultCorrection;
 import com.educationerp.exam.ResultCorrectionRepository;
 import com.educationerp.exam.ResultRepository;
 import com.educationerp.exam.dto.ExamDtos;
+import com.educationerp.student.Enrollment;
+import com.educationerp.student.EnrollmentRepository;
 import com.educationerp.student.StudentRepository;
+import com.educationerp.student.UserLookup;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,8 +28,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -45,6 +52,9 @@ public class ResultService {
     private final ResultCorrectionRepository corrections;
     private final ExamSubjectRepository subjects;
     private final ExaminationRepository examinations;
+    private final CourseOfferingRepository offerings;
+    private final EnrollmentRepository enrollments;
+    private final UserLookup users;
     private final GradingService grading;
     private final StudentRepository students;
     private final AuthorizationChecker auth;
@@ -55,10 +65,26 @@ public class ResultService {
     public List<ExamDtos.ResultResponse> enterMarks(UUID examSubjectId, ExamDtos.MarkEntryRequest request) {
         auth.requirePermission("MARKS_ENTER");
         ExamSubject subject = requireSubject(examSubjectId);
+        requireAccessibleOffering(subject.getCourseOfferingId(), "MARKS_ENTER");
         Examination exam = requireExam(subject.getExaminationId());
         if (exam.getStatus() == Examination.Status.PUBLISHED
                 || exam.getStatus() == Examination.Status.ARCHIVED) {
             throw AppException.rule("Marks cannot be entered once results are published.");
+        }
+
+        Set<UUID> roster = subject.getCourseOfferingId() == null
+                ? Set.of()
+                : rosterStudentIds(requireAccessibleOffering(subject.getCourseOfferingId(), "MARKS_ENTER"));
+        if (!roster.isEmpty()) {
+            for (ExamDtos.MarkEntry entry : request.marks()) {
+                if (students.findById(entry.studentId()).isEmpty()) {
+                    throw AppException.notFound("Student");
+                }
+                if (!roster.contains(entry.studentId())) {
+                    throw AppException.denied("A student in this marks entry is not enrolled "
+                            + "in the class this subject is taught to.");
+                }
+            }
         }
 
         List<Result> entered = new java.util.ArrayList<>();
@@ -110,12 +136,16 @@ public class ResultService {
             throw new AppException(ErrorCode.VALIDATION_ERROR, "Unknown result status.");
         }
 
-        switch (target) {
-            case VERIFIED -> auth.requirePermission("MARKS_VERIFY");
-            case APPROVED -> auth.requirePermission("MARKS_APPROVE");
-            case PUBLISHED -> auth.requirePermission("RESULT_PUBLISH");
-            default -> auth.requirePermission("MARKS_ENTER");
-        }
+        String permission = switch (target) {
+            case VERIFIED -> "MARKS_VERIFY";
+            case APPROVED -> "MARKS_APPROVE";
+            case PUBLISHED -> "RESULT_PUBLISH";
+            default -> "MARKS_ENTER";
+        };
+        auth.requirePermission(permission);
+        requireAccessibleOffering(
+                requireSubject(result.getExamSubjectId()).getCourseOfferingId(),
+                permission);
 
         if (current == Result.ResultStatus.PUBLISHED) {
             throw new AppException(ErrorCode.RESULT_ALREADY_PUBLISHED,
@@ -208,6 +238,9 @@ public class ResultService {
                                                                 ExamDtos.ResultCorrectionRequest request) {
         auth.requirePermission("RESULT_CORRECT");
         Result result = requireResult(resultId);
+        requireAccessibleOffering(
+                requireSubject(result.getExamSubjectId()).getCourseOfferingId(),
+                "RESULT_CORRECT");
         if (result.getStatus() != Result.ResultStatus.PUBLISHED) {
             throw AppException.rule("A correction is only needed for a published result. "
                     + "This result is " + result.getStatus() + ".");
@@ -256,6 +289,9 @@ public class ResultService {
                     "This correction has already been " + correction.getStatus() + ".");
         }
         Result result = requireResult(correction.getResultId());
+        requireAccessibleOffering(
+                requireSubject(result.getExamSubjectId()).getCourseOfferingId(),
+                "MARKS_APPROVE");
 
         if (!decision.approved()) {
             correction.setStatus(ResultCorrection.Status.REJECTED);
@@ -302,12 +338,69 @@ public class ResultService {
     @Transactional(readOnly = true)
     public List<ExamDtos.ResultCorrectionResponse> correctionsFor(UUID resultId) {
         auth.requirePermission("RESULT_READ");
+        requireAccessibleOffering(
+                requireSubject(requireResult(resultId).getExamSubjectId()).getCourseOfferingId(),
+                "RESULT_READ");
         return corrections.findByResultIdOrderByRequestedAtDesc(resultId).stream()
                 .map(ExamDtos.ResultCorrectionResponse::from)
                 .toList();
     }
 
     // ---------- helpers ----------
+
+    /**
+     * A verifier or controller of results (leadership, exam office, administrators) works
+     * across every subject; an examiner is limited to the class linked to the subject.
+     */
+    private boolean resultSupervisor() {
+        return auth.hasPermission("MARKS_APPROVE");
+    }
+
+    /**
+     * Loads the offering behind a subject only when the caller may act on it. A subject
+     * with no class link can only be handled by exam leadership, because a teacher cannot
+     * be held to their own class for something that has none. Returns the offering, or
+     * {@code null} for a supervisor handling an unlinked subject.
+     */
+    private CourseOffering requireAccessibleOffering(UUID courseOfferingId, String permission) {
+        auth.requirePermission(permission);
+        if (courseOfferingId == null) {
+            if (resultSupervisor()) {
+                return null;
+            }
+            throw AppException.denied("Separate a subject that is not tied to a class "
+                    + "before entering or changing its results.");
+        }
+        CourseOffering offering = offerings.findById(courseOfferingId)
+                .orElseThrow(() -> AppException.notFound("Course offering"));
+        if (resultSupervisor()) {
+            return offering;
+        }
+        UUID employeeId = users.employeeIdOf(auth.requireUser().userId())
+                .orElseThrow(() -> AppException.denied("You do not have permission to perform this action."));
+        if (offering.getTeacherId() == null || !offering.getTeacherId().equals(employeeId)) {
+            throw AppException.denied("You are not assigned to the class that takes this subject.");
+        }
+        return offering;
+    }
+
+    /** The roster of the class the subject is taught to, for the marks entry check. */
+    private Set<UUID> rosterStudentIds(CourseOffering offering) {
+        Set<UUID> ids = new HashSet<>();
+        if (offering == null || offering.getAcademicYear() == null || offering.getSchoolClass() == null) {
+            return ids;
+        }
+        for (Enrollment enrolment : enrollments
+                .findByAcademicYearIdAndSchoolClassIdAndStatusOrderByRollNumberAsc(
+                        offering.getAcademicYear().getId(), offering.getSchoolClass().getId(),
+                        Enrollment.Status.ACTIVE)) {
+            if (offering.getSection() == null
+                    || offering.getSection().getId().equals(enrolment.getSectionId())) {
+                ids.add(enrolment.getStudentId());
+            }
+        }
+        return ids;
+    }
 
     /**
      * Recalculates percentage, letter grade, grade point and pass flag from the mark and
