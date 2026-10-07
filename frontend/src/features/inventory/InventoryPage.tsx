@@ -1534,12 +1534,7 @@ function StoreForm({ onDone }: { onDone: () => void }) {
 
   const campuses = useQuery({
     queryKey: ['inventory', 'campuses'],
-    queryFn: () => api<PageResponse<{ id: string; name: string }>>('/api/v1/academic/campuses', {
-        query: {
-          page: 0,
-          size: 100,
-        },
-    }),
+    queryFn: () => api<{ id: string; name: string }[]>('/api/v1/academic/campuses'),
   })
 
   const create = useMutation({
@@ -1581,7 +1576,7 @@ function StoreForm({ onDone }: { onDone: () => void }) {
       <Field label="Campus">
         <Select name="campusId">
           <option value="">Any campus</option>
-          {(campuses.data?.data ?? []).map((campus) => (
+          {(campuses.data ?? []).map((campus) => (
             <option key={campus.id} value={campus.id}>
               {campus.name}
             </option>

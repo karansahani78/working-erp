@@ -443,7 +443,7 @@ function Sections() {
 
   const sections = useQuery({
     queryKey: ['sections', effectiveClass],
-    queryFn: () => api<Section[]>('/api/v1/academic/sections', { query: { classId: effectiveClass } }),
+    queryFn: () => api<Section[]>('/api/v1/academic/sections', { query: { schoolClassId: effectiveClass } }),
     enabled: Boolean(effectiveClass),
   })
 
@@ -505,9 +505,9 @@ function Sections() {
       {can('ACADEMIC_CREATE') && effectiveClass && (
         <CreateForm
           title="Add a section"
-          path={(values) => `/api/v1/academic/sections?classId=${values.classId ?? effectiveClass}`}
+          path="/api/v1/academic/sections"
           fields={[
-            { name: 'classId', label: 'Class', required: true, type: 'select',
+            { name: 'schoolClassId', label: 'Class', required: true, type: 'select',
               options: classes.data?.data.map((item) => ({ value: item.id, label: item.name })) },
             { name: 'name', label: 'Name', required: true },
             { name: 'code', label: 'Code', required: true },
@@ -691,9 +691,9 @@ function Campuses() {
   const { can } = useAuth()
   const campuses = useQuery({
     queryKey: ['campuses'],
-    queryFn: () => api<PageResponse<Campus>>('/api/v1/academic/campuses', { query: { size: 100 } }),
+    queryFn: () => api<Campus[]>('/api/v1/academic/campuses'),
   })
-  const rows = campuses.data?.data ?? []
+  const rows = campuses.data ?? []
 
   return (
     <>
@@ -743,7 +743,7 @@ function Rooms() {
   })
   const campuses = useQuery({
     queryKey: ['campuses'],
-    queryFn: () => api<PageResponse<Campus>>('/api/v1/academic/campuses', { query: { size: 100 } }),
+    queryFn: () => api<Campus[]>('/api/v1/academic/campuses'),
   })
 
   const rows = rooms.data ?? []
@@ -788,7 +788,7 @@ function Rooms() {
               name: 'campusId',
               label: 'Campus',
               type: 'select',
-              options: campuses.data?.data.map((campus) => ({ value: campus.id, label: campus.name })),
+              options: campuses.data?.map((campus) => ({ value: campus.id, label: campus.name })),
             },
           ]}
         />

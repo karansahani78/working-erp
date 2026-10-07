@@ -66,7 +66,7 @@ export function StudentEnrolmentPage({ studentId }: { studentId: string }) {
 
   const sections = useQuery({
     queryKey: ['sections', schoolClassId],
-    queryFn: () => api<Section[]>('/api/v1/academic/sections', { query: { classId: schoolClassId } }),
+    queryFn: () => api<Section[]>('/api/v1/academic/sections', { query: { schoolClassId } }),
     enabled: Boolean(schoolClassId),
   })
 
